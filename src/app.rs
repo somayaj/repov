@@ -187,18 +187,19 @@ impl App {
         self.selected_ref().map(|r| r.tip_oid.as_str())
     }
 
-    fn select_ref(&mut self, index: usize) {
+    fn set_ref_index(&mut self, index: usize) {
         if index < self.data.refs.len() {
             self.ref_index = index;
             self.commit_index = 0;
             self.file_index = 0;
-            self.panel = Panel::History;
             let _ = self.refresh_history();
             let _ = self.load_selected_files();
         }
     }
 
     pub fn select_ref_on_enter(&mut self) {
+        let _ = self.refresh_history();
+        let _ = self.load_selected_files();
         self.panel = Panel::History;
     }
 
@@ -328,7 +329,7 @@ impl App {
 
     pub fn jump_top(&mut self) {
         match self.panel {
-            Panel::Refs => self.select_ref(0),
+            Panel::Refs => self.set_ref_index(0),
             Panel::History => {
                 self.commit_index = 0;
                 self.file_index = 0;
@@ -344,7 +345,7 @@ impl App {
         match self.panel {
             Panel::Refs => {
                 if !self.data.refs.is_empty() {
-                    self.select_ref(self.data.refs.len() - 1);
+                    self.set_ref_index(self.data.refs.len() - 1);
                 }
             }
             Panel::History => {
@@ -366,7 +367,7 @@ impl App {
         match self.panel {
             Panel::Refs => {
                 let next = self.ref_index.saturating_sub(PAGE_SIZE);
-                self.select_ref(next);
+                self.set_ref_index(next);
             }
             Panel::History => {
                 self.commit_index = self.commit_index.saturating_sub(PAGE_SIZE);
@@ -384,7 +385,7 @@ impl App {
             Panel::Refs => {
                 if !self.data.refs.is_empty() {
                     let next = (self.ref_index + PAGE_SIZE).min(self.data.refs.len() - 1);
-                    self.select_ref(next);
+                    self.set_ref_index(next);
                 }
             }
             Panel::History => {
@@ -443,7 +444,7 @@ impl App {
         match self.panel {
             Panel::Refs => {
                 if self.ref_index + 1 < self.data.refs.len() {
-                    self.select_ref(self.ref_index + 1);
+                    self.set_ref_index(self.ref_index + 1);
                 }
             }
             Panel::History => {
@@ -470,7 +471,7 @@ impl App {
         match self.panel {
             Panel::Refs => {
                 if self.ref_index > 0 {
-                    self.select_ref(self.ref_index - 1);
+                    self.set_ref_index(self.ref_index - 1);
                 }
             }
             Panel::History => {
