@@ -448,6 +448,7 @@ fn draw_help(frame: &mut Frame) {
         Line::from(""),
         Line::from(" Refs: branches only — ↑/↓ or j/k browse, Enter opens History for branch."),
         Line::from(" Branches: green=HEAD, magenta=remote. @ = branch tip in History."),
+        Line::from(" Graph: ● = commit, 1–9 = merge (1 = newest merge, + = 10th or later)."),
         Line::from(""),
         Line::from(" Resize"),
         Line::from("   [ / ]             refs panel narrower / wider"),
