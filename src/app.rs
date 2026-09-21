@@ -571,6 +571,9 @@ impl App {
         if self.files_mode == FilesMode::Working {
             let entries = RepoData::load_working_tree(&self.repo_path)?;
             self.files = entries;
+            if self.file_index >= self.files.len() {
+                self.file_index = self.files.len().saturating_sub(1);
+            }
             return Ok(());
         }
 
@@ -603,6 +606,10 @@ impl App {
             self.files = entries;
         } else {
             self.files.clear();
+        }
+
+        if self.file_index >= self.files.len() {
+            self.file_index = self.files.len().saturating_sub(1);
         }
 
         Ok(())
