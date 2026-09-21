@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, StatefulWidget, Wrap},
     Frame,
 };
 
@@ -127,10 +127,16 @@ fn draw_refs(frame: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(panel_style(active));
 
-    let list = List::new(items)
-        .block(block)
-        .scroll_offset(app.list_scroll() as u16);
-    frame.render_widget(list, area);
+    let list = List::new(items).block(block);
+    render_list(
+        frame,
+        area,
+        list,
+        app.ref_index(),
+        app.list_scroll(),
+        !app.refs().is_empty(),
+        app.panel() == Panel::Refs,
+    );
 }
 
 fn draw_history(frame: &mut Frame, app: &App, area: Rect) {
@@ -178,10 +184,16 @@ fn draw_history(frame: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(panel_style(active));
 
-    let list = List::new(items)
-        .block(block)
-        .scroll_offset(app.list_scroll() as u16);
-    frame.render_widget(list, area);
+    let list = List::new(items).block(block);
+    render_list(
+        frame,
+        area,
+        list,
+        app.commit_index(),
+        app.list_scroll(),
+        !app.commits().is_empty(),
+        active,
+    );
 }
 
 fn draw_files(frame: &mut Frame, app: &App, area: Rect) {
@@ -253,8 +265,32 @@ fn draw_files(frame: &mut Frame, app: &App, area: Rect) {
         List::new(items).block(block)
     };
 
-    let list = list.scroll_offset(app.list_scroll() as u16);
-    frame.render_widget(list, area);
+    render_list(
+        frame,
+        area,
+        list,
+        app.file_index(),
+        app.list_scroll(),
+        !files.is_empty(),
+        active,
+    );
+}
+
+fn render_list(
+    frame: &mut Frame,
+    area: Rect,
+    list: List,
+    selected: usize,
+    scroll: usize,
+    has_items: bool,
+    highlight: bool,
+) {
+    let mut state = ListState::default();
+    if highlight && has_items {
+        state.select(Some(selected));
+    }
+    *state.offset_mut() = scroll;
+    StatefulWidget::render(list, area, frame.buffer_mut(), &mut state);
 }
 
 fn draw_worktree_item(
@@ -333,7 +369,7 @@ fn draw_help(frame: &mut Frame) {
         Line::from("   PgUp / PgDn       page up / down"),
         Line::from(""),
         Line::from(" Search & view"),
-        Line::from("   /                 search commits (message, author, sha)"),
+        Line::from("   / or f            search commits (message, author, sha)"),
         Line::from("   Enter             open diff (History / Files)"),
         Line::from("   c                 cycle files: changed → all → working tree"),
         Line::from("   y                 copy commit SHA"),

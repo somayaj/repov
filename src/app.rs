@@ -181,13 +181,6 @@ impl App {
     }
 
     pub fn open_file_diff(&mut self) -> Result<()> {
-        if self.files_mode == FilesMode::Working {
-            self.set_flash("Working tree diff not yet supported — select a commit file");
-            return Ok(());
-        }
-        let Some(commit) = self.selected_commit() else {
-            return Ok(());
-        };
         let Some(entry) = self.files.get(self.file_index) else {
             return Ok(());
         };
@@ -196,13 +189,23 @@ impl App {
             return Ok(());
         }
 
-        let patch = RepoData::load_file_diff(&commit.oid, &entry.path, &self.repo_path)?;
+        let (title, patch) = if self.files_mode == FilesMode::Working {
+            let patch = RepoData::load_working_tree_file_diff(&entry.path, &self.repo_path)?;
+            (format!("{} (working tree)", entry.path), patch)
+        } else {
+            let Some(commit) = self.selected_commit() else {
+                return Ok(());
+            };
+            let patch = RepoData::load_file_diff(&commit.oid, &entry.path, &self.repo_path)?;
+            (format!("{} @ {}", entry.path, commit.short_id), patch)
+        };
+
         if patch.trim().is_empty() {
             self.set_flash("No diff for this file");
             return Ok(());
         }
         self.diff_view = Some(DiffView {
-            title: format!("{} @ {}", entry.path, commit.short_id),
+            title,
             lines: parse_patch(&patch),
             scroll: 0,
         });
@@ -498,13 +501,7 @@ impl App {
 
     fn load_selected_files(&mut self) -> Result<()> {
         if self.files_mode == FilesMode::Working {
-            let cache_key = "working".to_string();
-            if let Some(cached) = self.files_cache.get(&cache_key) {
-                self.files = cached.clone();
-                return Ok(());
-            }
             let entries = RepoData::load_working_tree(&self.repo_path)?;
-            self.files_cache.insert(cache_key, entries.clone());
             self.files = entries;
             return Ok(());
         }
@@ -632,7 +629,7 @@ impl App {
         };
 
         format!(
-            "repov | {} | {ref_name} | {id} | {author} | {date} | {files_mode} | wt: {}{search} | / search | ? help",
+            "repov | {} | {ref_name} | {id} | {author} | {date} | {files_mode} | wt: {}{search} | / f ? help",
             self.data.repo_name,
             self.data.work_tree_summary
         )

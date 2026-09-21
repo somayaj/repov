@@ -27,9 +27,6 @@ pub struct RefEntry {
     pub tip_oid: String,
 }
 
-/// Alias kept for minimal churn in call sites.
-pub type BranchInfo = RefEntry;
-
 #[derive(Clone)]
 pub struct TreeEntry {
     pub path: String,
@@ -105,7 +102,7 @@ impl RepoData {
         let repo = Repository::open(repo_path).context("failed to open repository")?;
         let tip = Oid::from_str(tip_oid).context("invalid branch tip")?;
         let raw_commits = walk_commits(&repo, vec![tip], limit)?;
-        let branch_map = branch_labels_for_commits(&repo, &raw_commits)?;
+        let branch_map = ref_labels_for_commits(&repo, &raw_commits)?;
 
         let commits = raw_commits
             .into_iter()
@@ -150,6 +147,11 @@ impl RepoData {
         let oid = Oid::from_str(oid).context("invalid commit oid")?;
         let commit = repo.find_commit(oid)?;
         format_file_diff(&repo, &commit, path)
+    }
+
+    pub fn load_working_tree_file_diff(path: &str, repo_path: &str) -> Result<String> {
+        let repo = Repository::open(repo_path).context("failed to open repository")?;
+        format_working_tree_file_diff(&repo, path)
     }
 }
 
@@ -222,19 +224,21 @@ fn load_branches(repo: &Repository, head_name: &Option<String>) -> Result<Vec<Re
 fn load_tags(repo: &Repository) -> Result<Vec<RefEntry>> {
     let mut tags = Vec::new();
 
-    repo.tag_names(None)?.iter().for_each(|name| {
-        if let Ok(reference) = repo.find_reference(&format!("refs/tags/{name}")) {
-            if let Ok(obj) = reference.peel_to_commit() {
-                let id = obj.id().to_string();
-                tags.push(RefEntry {
-                    kind: RefKind::Tag,
-                    name: name.to_string(),
-                    short_id: id[..7].to_string(),
-                    tip_oid: id,
-                });
-            }
-        }
-    });
+    for name in repo.tag_names(None)?.iter().flatten() {
+        let Ok(reference) = repo.find_reference(&format!("refs/tags/{name}")) else {
+            continue;
+        };
+        let Ok(commit) = reference.peel_to_commit() else {
+            continue;
+        };
+        let id = commit.id().to_string();
+        tags.push(RefEntry {
+            kind: RefKind::Tag,
+            name: name.to_string(),
+            short_id: id[..7].to_string(),
+            tip_oid: id,
+        });
+    }
 
     tags.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(tags)
@@ -349,7 +353,7 @@ fn walk_commits(
     Ok(commits)
 }
 
-fn branch_labels_for_commits(
+fn ref_labels_for_commits(
     repo: &Repository,
     commits: &[git2::Commit],
 ) -> Result<HashMap<Oid, Vec<String>>> {
@@ -365,6 +369,21 @@ fn branch_labels_for_commits(
                     labels.entry(commit.id()).or_default().push(name);
                 }
             }
+        }
+    }
+
+    for name in repo.tag_names(None)?.iter().flatten() {
+        let Ok(reference) = repo.find_reference(&format!("refs/tags/{name}")) else {
+            continue;
+        };
+        let Ok(commit) = reference.peel_to_commit() else {
+            continue;
+        };
+        if commit_ids.contains(&commit.id()) {
+            labels
+                .entry(commit.id())
+                .or_default()
+                .push(format!("tag:{name}"));
         }
     }
 
@@ -468,6 +487,34 @@ fn format_commit_diff(repo: &Repository, commit: &git2::Commit) -> Result<String
 
     let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)?;
     patch_to_string(&diff)
+}
+
+fn format_working_tree_file_diff(repo: &Repository, path: &str) -> Result<String> {
+    let mut sections = Vec::new();
+
+    if let Ok(head) = repo.head() {
+        if let Ok(head_tree) = head.peel_to_tree() {
+            let mut opts = DiffOptions::new();
+            opts.pathspec(path);
+            let diff = repo.diff_tree_to_index(Some(&head_tree), None, Some(&mut opts))?;
+            let staged = patch_to_string(&diff)?;
+            if !staged.trim().is_empty() {
+                sections.push(format!("--- staged ({path}) ---"));
+                sections.push(staged);
+            }
+        }
+    }
+
+    let mut opts = DiffOptions::new();
+    opts.pathspec(path);
+    let diff = repo.diff_index_to_workdir(None, Some(&mut opts))?;
+    let unstaged = patch_to_string(&diff)?;
+    if !unstaged.trim().is_empty() {
+        sections.push(format!("--- unstaged ({path}) ---"));
+        sections.push(unstaged);
+    }
+
+    Ok(sections.join("\n"))
 }
 
 fn format_file_diff(repo: &Repository, commit: &git2::Commit, path: &str) -> Result<String> {

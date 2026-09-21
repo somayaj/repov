@@ -100,7 +100,7 @@ fn run_loop(
                     KeyCode::Char('c') => app.toggle_files_mode(),
                     KeyCode::Char('y') => app.copy_sha(),
                     KeyCode::Char('?') => app.toggle_help(),
-                    KeyCode::Char('/') => app.start_search(),
+                    KeyCode::Char('/') | KeyCode::Char('f') => app.start_search(),
                     KeyCode::Char('g') => app.jump_top(),
                     KeyCode::Char('G') => app.jump_bottom(),
                     KeyCode::PageUp => app.page_up(),

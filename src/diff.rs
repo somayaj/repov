@@ -6,6 +6,7 @@ use ratatui::{
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum DiffLineKind {
     Header,
+    Section,
     Hunk,
     Add,
     Remove,
@@ -22,7 +23,9 @@ pub fn parse_patch(patch: &str) -> Vec<DiffLine> {
     patch
         .lines()
         .map(|line| {
-            let kind = if line.starts_with("+++") || line.starts_with("---") {
+            let kind = if line.starts_with("--- staged") || line.starts_with("--- unstaged") {
+                DiffLineKind::Section
+            } else if line.starts_with("+++") || line.starts_with("---") {
                 DiffLineKind::Header
             } else if line.starts_with("@@") {
                 DiffLineKind::Hunk
@@ -44,6 +47,7 @@ pub fn parse_patch(patch: &str) -> Vec<DiffLine> {
 pub fn styled_line(line: &DiffLine) -> Line<'static> {
     let style = match line.kind {
         DiffLineKind::Header => Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        DiffLineKind::Section => Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
         DiffLineKind::Hunk => Style::default().fg(Color::Cyan),
         DiffLineKind::Add => Style::default().fg(Color::Green),
         DiffLineKind::Remove => Style::default().fg(Color::Red),
