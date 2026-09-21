@@ -10,6 +10,7 @@ use std::io;
 use std::time::Duration;
 
 mod app;
+mod diff;
 mod graph;
 mod repo;
 mod ui;
@@ -54,17 +55,36 @@ fn run_loop(
 
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
-                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c')
+                {
                     break;
+                }
+
+                if app.diff_is_open() {
+                    match key.code {
+                        KeyCode::Esc => app.close_diff(),
+                        KeyCode::Char('j') | KeyCode::Down => app.scroll_diff_down(),
+                        KeyCode::Char('k') | KeyCode::Up => app.scroll_diff_up(),
+                        KeyCode::Char('q') => break,
+                        _ => {}
+                    }
+                    continue;
                 }
 
                 match key.code {
                     KeyCode::Char('q') => break,
                     KeyCode::Char('r') => app.reload()?,
+                    KeyCode::Char('c') => app.toggle_files_mode(),
+                    KeyCode::Char('y') => app.copy_sha(),
                     KeyCode::Tab => app.next_panel(),
                     KeyCode::BackTab => app.prev_panel(),
                     KeyCode::Char('j') | KeyCode::Down => app.move_down(),
                     KeyCode::Char('k') | KeyCode::Up => app.move_up(),
+                    KeyCode::Enter => match app.panel() {
+                        app::Panel::History => app.open_commit_diff()?,
+                        app::Panel::Files => app.open_file_diff()?,
+                        app::Panel::Refs => {}
+                    },
                     _ => {}
                 }
             }
