@@ -1,0 +1,17 @@
+[package]
+name = "repov"
+version = "0.1.0"
+edition = "2021"
+description = "A gitk-style TUI for exploring git repositories on macOS"
+license = "MIT"
+
+[[bin]]
+name = "repov"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+crossterm = "0.28"
+git2 = "0.19"
+ratatui = "0.29"
