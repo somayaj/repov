@@ -23,10 +23,15 @@ pub fn render_graph(commits: &[CommitNode]) -> Vec<GraphLine> {
         .map(|(i, c)| (c.id.as_str(), i))
         .collect();
 
+    let merge_total = commits
+        .iter()
+        .filter(|c| c.parents.len() > 1)
+        .count();
+
     let mut lanes: Vec<Option<String>> = Vec::new();
     let mut lines = Vec::with_capacity(commits.len());
     let mut max_width = 0;
-    let mut merge_num = 0;
+    let mut merge_seen = 0;
 
     for commit in commits {
         let col = lanes
@@ -40,8 +45,10 @@ pub fn render_graph(commits: &[CommitNode]) -> Vec<GraphLine> {
         max_width = max_width.max(lanes.len());
 
         let node = if commit.parents.len() > 1 {
-            merge_num += 1;
-            merge_node_char(merge_num)
+            merge_seen += 1;
+            // Descending top-to-bottom: newest merge gets the highest number.
+            let label = merge_total - merge_seen + 1;
+            merge_node_char(label)
         } else {
             '●'
         };
@@ -92,7 +99,7 @@ pub fn render_graph(commits: &[CommitNode]) -> Vec<GraphLine> {
     lines
 }
 
-/// Merge commits are numbered 1–9 (newest first); 10+ shown as '+'.
+/// Merge labels 1–9 (1 = oldest merge); 10+ shown as '+'.
 fn merge_node_char(n: usize) -> char {
     match n {
         1..=9 => char::from_digit(n as u32, 10).unwrap_or('+'),
@@ -113,7 +120,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn merge_commits_numbered_newest_first() {
+    fn merge_commits_numbered_descending() {
         let commits = vec![
             CommitNode {
                 id: "c1".into(),
@@ -142,8 +149,8 @@ mod tests {
         ];
 
         let lines = render_graph(&commits);
-        assert!(lines[0].symbols.contains('1'), "newest merge is 1");
-        assert!(lines[3].symbols.contains('2'), "older merge is 2");
+        assert!(lines[0].symbols.contains('2'), "newest merge is highest (2)");
+        assert!(lines[3].symbols.contains('1'), "older merge is 1");
         assert!(lines[1].symbols.contains('●'));
     }
 }
