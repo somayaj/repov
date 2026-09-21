@@ -25,6 +25,9 @@ repov /path/to/repo
 | `PgUp` / `PgDn` | Page up / down |
 | `/` or `f` | Search commits (message, author, sha) |
 | `Enter` | Open commit or file diff |
+| `b` | Branch line view (linear history) |
+| `p` | Toggle branch line / full merge graph |
+| `h` | Show / hide commit graph column |
 | `c` | Cycle files: changed → all → working tree |
 | `y` | Copy commit SHA to clipboard |
 | `r` | Reload repository |
