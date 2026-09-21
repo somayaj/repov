@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2021"
 description = "A gitk-style TUI for exploring git repositories on macOS"
 license = "MIT"
+authors = ["Asha Somayajula <somayajulaas@gmail.com>"]
+repository = "https://github.com/somayaj/repov"
+homepage = "https://github.com/somayaj/repov"
+readme = "README.md"
+keywords = ["git", "tui", "terminal", "gitk", "repository"]
+categories = ["command-line-utilities", "development-tools"]
 
 [[bin]]
 name = "repov"
