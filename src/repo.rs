@@ -382,42 +382,113 @@ fn load_tree_entries(repo: &Repository, commit: &git2::Commit) -> Result<Vec<Tre
 }
 
 fn load_changed_entries(repo: &Repository, commit: &git2::Commit) -> Result<Vec<TreeEntry>> {
+    let diff = commit_tree_diff(repo, commit, None)?;
+    let mut by_path: HashMap<String, TreeEntry> = HashMap::new();
+    collect_changed_paths(repo, commit, &diff, &mut by_path)?;
+
+    let mut entries: Vec<_> = by_path.into_values().collect();
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(entries)
+}
+
+/// Diff commit tree against parent(s). Merge commits combine diffs vs each parent (git diff-tree -m).
+fn commit_tree_diff<'a>(
+    repo: &'a Repository,
+    commit: &git2::Commit,
+    pathspec: Option<&str>,
+) -> Result<Diff<'a>> {
     let tree = commit.tree()?;
-    let parent_tree = if commit.parent_count() > 0 {
-        Some(commit.parent(0)?.tree()?)
-    } else {
-        None
-    };
+    let parent_count = commit.parent_count();
 
-    let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)?;
-    let mut entries = Vec::new();
+    let mut opts = DiffOptions::new();
+    if let Some(pathspec) = pathspec {
+        opts.pathspec(pathspec);
+    }
 
+    if parent_count <= 1 {
+        let parent_tree = if parent_count == 1 {
+            Some(commit.parent(0)?.tree()?)
+        } else {
+            None
+        };
+        return Ok(repo.diff_tree_to_tree(
+            parent_tree.as_ref(),
+            Some(&tree),
+            Some(&mut opts),
+        )?);
+    }
+
+    let mut combined = repo.diff_tree_to_tree(
+        Some(&commit.parent(0)?.tree()?),
+        Some(&tree),
+        Some(&mut opts),
+    )?;
+
+    for i in 1..parent_count {
+        let mut parent_opts = DiffOptions::new();
+        if let Some(pathspec) = pathspec {
+            parent_opts.pathspec(pathspec);
+        }
+        let parent_tree = commit.parent(i)?.tree()?;
+        let extra =
+            repo.diff_tree_to_tree(Some(&parent_tree), Some(&tree), Some(&mut parent_opts))?;
+        combined.merge(&extra)?;
+    }
+
+    Ok(combined)
+}
+
+fn collect_changed_paths(
+    repo: &Repository,
+    commit: &git2::Commit,
+    diff: &Diff,
+    out: &mut HashMap<String, TreeEntry>,
+) -> Result<()> {
     diff.foreach(
         &mut |delta, _| {
             let status = map_delta_status(delta.status());
-            let old_path = delta.old_file().path().map(|p| p.to_string_lossy().to_string());
-            let new_path = delta.new_file().path().map(|p| p.to_string_lossy().to_string());
-            let path = new_path.or(old_path).unwrap_or_else(|| "?".to_string());
+            let old_path = delta
+                .old_file()
+                .path()
+                .map(|p| p.to_string_lossy().to_string());
+            let new_path = delta
+                .new_file()
+                .path()
+                .map(|p| p.to_string_lossy().to_string());
+            let path = new_path
+                .clone()
+                .or(old_path.clone())
+                .unwrap_or_else(|| "?".to_string());
             let is_dir = delta.new_file().mode() == git2::FileMode::Tree
                 || delta.old_file().mode() == git2::FileMode::Tree;
 
-            entries.push(TreeEntry {
-                path: path.clone(),
-                display: path,
-                is_dir,
-                change: Some(status),
-                wt_staged: None,
-                wt_unstaged: None,
-            });
+            if is_dir {
+                let base = new_path.as_deref().or(old_path.as_deref()).unwrap_or(&path);
+                let pathspec = format!("{}/**", base.trim_end_matches('/'));
+                if let Ok(sub) = commit_tree_diff(repo, commit, Some(&pathspec)) {
+                    let _ = collect_changed_paths(repo, commit, &sub, out);
+                }
+            } else {
+                insert_changed_file(out, path, status);
+            }
             true
         },
         None,
         None,
         None,
     )?;
+    Ok(())
+}
 
-    entries.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(entries)
+fn insert_changed_file(out: &mut HashMap<String, TreeEntry>, path: String, status: ChangeStatus) {
+    out.entry(path.clone()).or_insert_with(|| TreeEntry {
+        path: path.clone(),
+        display: path,
+        is_dir: false,
+        change: Some(status),
+        wt_staged: None,
+        wt_unstaged: None,
+    });
 }
 
 fn map_delta_status(status: git2::Delta) -> ChangeStatus {
@@ -462,14 +533,7 @@ fn flatten_tree(
 }
 
 fn format_commit_diff(repo: &Repository, commit: &git2::Commit) -> Result<String> {
-    let tree = commit.tree()?;
-    let parent_tree = if commit.parent_count() > 0 {
-        Some(commit.parent(0)?.tree()?)
-    } else {
-        None
-    };
-
-    let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), None)?;
+    let diff = commit_tree_diff(repo, commit, None)?;
     patch_to_string(&diff)
 }
 
@@ -502,17 +566,7 @@ fn format_working_tree_file_diff(repo: &Repository, path: &str) -> Result<String
 }
 
 fn format_file_diff(repo: &Repository, commit: &git2::Commit, path: &str) -> Result<String> {
-    let tree = commit.tree()?;
-    let parent_tree = if commit.parent_count() > 0 {
-        Some(commit.parent(0)?.tree()?)
-    } else {
-        None
-    };
-
-    let mut opts = DiffOptions::new();
-    opts.pathspec(path);
-
-    let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(&mut opts))?;
+    let diff = commit_tree_diff(repo, commit, Some(path))?;
     patch_to_string(&diff)
 }
 
@@ -535,4 +589,21 @@ fn format_time(seconds: i64) -> String {
         .single()
         .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_else(|| "-".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merge_commit_lists_changed_files() {
+        let repo = Repository::open(".").expect("open repo");
+        let oid = Oid::from_str("53760c978398b46d265d93ae9c0da90acaaa5493").expect("oid");
+        let commit = repo.find_commit(oid).expect("commit");
+        assert!(commit.parent_count() > 1, "expected merge commit");
+
+        let entries = load_changed_entries(&repo, &commit).expect("changed entries");
+        assert_eq!(entries.len(), 6, "merge commit changed file count");
+        assert!(entries.iter().all(|e| !e.is_dir));
+    }
 }
