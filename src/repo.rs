@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use chrono::{Local, TimeZone};
 use git2::{BranchType, Diff, DiffFormat, DiffOptions, Oid, ObjectType, Repository};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -529,22 +530,9 @@ fn patch_to_string(diff: &Diff) -> Result<String> {
 }
 
 fn format_time(seconds: i64) -> String {
-    let days = seconds.max(0) / 86_400;
-    let (year, month, day) = civil_from_days(days);
-    format!("{year:04}-{month:02}-{day:02}")
-}
-
-/// Convert days since Unix epoch to (year, month, day).
-fn civil_from_days(days: i64) -> (i32, u32, u32) {
-    let z = days + 719_468;
-    let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
-    let doe = (z - era * 146_097) as u32;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let year = (yoe as i64 + era * 400) as i32;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = if mp < 10 { year } else { year + 1 };
-    (year, month, day)
+    Local
+        .timestamp_opt(seconds, 0)
+        .single()
+        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|| "-".to_string())
 }

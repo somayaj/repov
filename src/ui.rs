@@ -231,7 +231,7 @@ fn draw_history(frame: &mut Frame, app: &App, area: Rect) {
                 ));
             }
             spans.extend([
-                Span::styled(format!("{:<12}", commit.date), style.fg(Color::DarkGray)),
+                Span::styled(format!("{:<16}", commit.date), style.fg(Color::DarkGray)),
                 Span::styled(format!("{:<14}", truncate(&commit.author, 14)), style),
                 Span::styled(commit.short_id.clone(), style.fg(Color::Cyan)),
                 Span::raw(" "),
