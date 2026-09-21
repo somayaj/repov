@@ -5,7 +5,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal};
 use std::io;
 use std::time::Duration;
 
@@ -54,7 +54,11 @@ fn run_loop(
         terminal.draw(|frame| ui::draw(frame, app))?;
 
         if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
+            match event::read()? {
+                Event::Resize(width, height) => {
+                    terminal.resize(Rect::new(0, 0, width, height))?;
+                }
+                Event::Key(key) => {
                 if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c')
                 {
                     break;
@@ -88,6 +92,10 @@ fn run_loop(
                         KeyCode::Esc => app.close_diff(),
                         KeyCode::Char('j') | KeyCode::Down => app.scroll_diff_down(),
                         KeyCode::Char('k') | KeyCode::Up => app.scroll_diff_up(),
+                        KeyCode::Char('-') => app.adjust_diff_height(5),
+                        KeyCode::Char('=') => app.adjust_diff_height(-5),
+                        KeyCode::Char('[') => app.adjust_refs_width(-2),
+                        KeyCode::Char(']') => app.adjust_refs_width(2),
                         KeyCode::Char('q') => break,
                         _ => {}
                     }
@@ -100,6 +108,10 @@ fn run_loop(
                     KeyCode::Char('c') => app.toggle_files_mode(),
                     KeyCode::Char('b') => app.show_branch_line(),
                     KeyCode::Char('p') => app.toggle_first_parent(),
+                    KeyCode::Char('[') => app.adjust_refs_width(-2),
+                    KeyCode::Char(']') => app.adjust_refs_width(2),
+                    KeyCode::Char('-') => app.adjust_history_height(-5),
+                    KeyCode::Char('=') => app.adjust_history_height(5),
                     KeyCode::Char('y') => app.copy_sha(),
                     KeyCode::Char('?') => app.toggle_help(),
                     KeyCode::Char('/') | KeyCode::Char('f') => app.start_search(),
@@ -123,6 +135,8 @@ fn run_loop(
                     }
                     _ => {}
                 }
+                }
+                _ => {}
             }
         }
     }

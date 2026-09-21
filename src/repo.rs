@@ -16,7 +16,6 @@ pub enum ChangeStatus {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum RefKind {
     Branch { is_head: bool, is_remote: bool },
-    Tag,
 }
 
 #[derive(Clone)]
@@ -69,8 +68,7 @@ impl RepoData {
             .ok()
             .and_then(|h| h.shorthand().map(String::from));
 
-        let mut refs = load_branches(&repo, &head_name)?;
-        refs.extend(load_tags(&repo)?);
+        let refs = load_branches(&repo, &head_name)?;
         let head_ref_index = refs
             .iter()
             .position(|r| matches!(r.kind, RefKind::Branch { is_head: true, .. }))
@@ -220,29 +218,6 @@ fn load_branches(repo: &Repository, head_name: &Option<String>) -> Result<Vec<Re
 
     branches.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(branches)
-}
-
-fn load_tags(repo: &Repository) -> Result<Vec<RefEntry>> {
-    let mut tags = Vec::new();
-
-    for name in repo.tag_names(None)?.iter().flatten() {
-        let Ok(reference) = repo.find_reference(&format!("refs/tags/{name}")) else {
-            continue;
-        };
-        let Ok(commit) = reference.peel_to_commit() else {
-            continue;
-        };
-        let id = commit.id().to_string();
-        tags.push(RefEntry {
-            kind: RefKind::Tag,
-            name: name.to_string(),
-            short_id: id[..7].to_string(),
-            tip_oid: id,
-        });
-    }
-
-    tags.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(tags)
 }
 
 fn summarize_work_tree(repo: &Repository) -> Result<String> {

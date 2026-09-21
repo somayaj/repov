@@ -39,17 +39,29 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     if app.diff_is_open() {
         let overlay = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
+            .constraints([
+                Constraint::Percentage(app.layout().diff_top_pct),
+                Constraint::Percentage(100 - app.layout().diff_top_pct),
+            ])
             .split(main_area);
 
+        let layout = app.layout();
+        let refs_pct = layout.refs_pct;
         let main = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(18), Constraint::Percentage(82)])
+            .constraints([
+                Constraint::Percentage(refs_pct),
+                Constraint::Percentage(100 - refs_pct),
+            ])
             .split(overlay[0]);
 
+        let history_pct = layout.history_pct;
         let right = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(62), Constraint::Percentage(38)])
+            .constraints([
+                Constraint::Percentage(history_pct),
+                Constraint::Percentage(100 - history_pct),
+            ])
             .split(main[1]);
 
         draw_refs(frame, app, main[0]);
@@ -57,14 +69,23 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_files(frame, app, right[1]);
         draw_diff(frame, app, overlay[1]);
     } else {
+        let layout = app.layout();
+        let refs_pct = layout.refs_pct;
         let main = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(18), Constraint::Percentage(82)])
+            .constraints([
+                Constraint::Percentage(refs_pct),
+                Constraint::Percentage(100 - refs_pct),
+            ])
             .split(main_area);
 
+        let history_pct = layout.history_pct;
         let right = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Percentage(62), Constraint::Percentage(38)])
+            .constraints([
+                Constraint::Percentage(history_pct),
+                Constraint::Percentage(100 - history_pct),
+            ])
             .split(main[1]);
 
         draw_refs(frame, app, main[0]);
@@ -101,19 +122,14 @@ fn draw_refs(frame: &mut Frame, app: &App, area: Rect) {
         .iter()
         .enumerate()
         .map(|(i, ref_entry)| {
-            let (marker, base_style) = match ref_entry.kind {
-                RefKind::Branch { is_head, is_remote } => {
-                    let marker = if is_head { "HEAD " } else { "     " };
-                    let style = if is_remote {
-                        Style::default().fg(Color::Magenta)
-                    } else if is_head {
-                        Style::default().fg(Color::Green)
-                    } else {
-                        Style::default().fg(Color::White)
-                    };
-                    (marker, style)
-                }
-                RefKind::Tag => (" tag ", Style::default().fg(Color::Yellow)),
+            let RefKind::Branch { is_head, is_remote } = ref_entry.kind;
+            let marker = if is_head { "HEAD " } else { "     " };
+            let base_style = if is_remote {
+                Style::default().fg(Color::Magenta)
+            } else if is_head {
+                Style::default().fg(Color::Green)
+            } else {
+                Style::default().fg(Color::White)
             };
 
             let style = if i == app.ref_index() && active {
@@ -415,8 +431,13 @@ fn draw_help(frame: &mut Frame) {
         Line::from("   ?                 toggle this help"),
         Line::from("   q / Ctrl+C        quit"),
         Line::from(""),
-        Line::from(" Refs: pick a branch (j/k) — History updates automatically. @ = branch tip."),
-        Line::from(" Branches: green=HEAD, magenta=remote, yellow=tag. Enter on Refs → History."),
+        Line::from(" Refs: branches only (j/k). History updates automatically. @ = branch tip."),
+        Line::from(" Branches: green=HEAD, magenta=remote. Enter on Refs → History."),
+        Line::from(""),
+        Line::from(" Resize"),
+        Line::from("   [ / ]             refs panel narrower / wider"),
+        Line::from("   - / =             history vs files taller / shorter"),
+        Line::from("   (with diff open)  - / = resizes diff panel"),
         Line::from(" Working tree mode (c) shows staged (S) and unstaged (U) changes."),
     ];
 

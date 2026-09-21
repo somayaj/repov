@@ -30,6 +30,23 @@ pub struct DiffView {
 
 const PAGE_SIZE: usize = 10;
 
+#[derive(Clone, Copy)]
+pub struct LayoutSizes {
+    pub refs_pct: u16,
+    pub history_pct: u16,
+    pub diff_top_pct: u16,
+}
+
+impl Default for LayoutSizes {
+    fn default() -> Self {
+        Self {
+            refs_pct: 18,
+            history_pct: 62,
+            diff_top_pct: 35,
+        }
+    }
+}
+
 pub struct App {
     repo_path: String,
     data: RepoData,
@@ -50,6 +67,7 @@ pub struct App {
     search_query: String,
     show_help: bool,
     first_parent: bool,
+    layout: LayoutSizes,
 }
 
 impl App {
@@ -77,6 +95,7 @@ impl App {
             search_query: String::new(),
             show_help: false,
             first_parent: false,
+            layout: LayoutSizes::default(),
         };
         app.refresh_history()?;
         app.load_selected_files()?;
@@ -119,6 +138,25 @@ impl App {
 
     pub fn first_parent(&self) -> bool {
         self.first_parent
+    }
+
+    pub fn layout(&self) -> LayoutSizes {
+        self.layout
+    }
+
+    pub fn adjust_refs_width(&mut self, delta: i16) {
+        let next = self.layout.refs_pct as i16 + delta;
+        self.layout.refs_pct = next.clamp(12, 35) as u16;
+    }
+
+    pub fn adjust_history_height(&mut self, delta: i16) {
+        let next = self.layout.history_pct as i16 + delta;
+        self.layout.history_pct = next.clamp(35, 85) as u16;
+    }
+
+    pub fn adjust_diff_height(&mut self, delta: i16) {
+        let next = self.layout.diff_top_pct as i16 + delta;
+        self.layout.diff_top_pct = next.clamp(20, 70) as u16;
     }
 
     pub fn toggle_first_parent(&mut self) {
