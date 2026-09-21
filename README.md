@@ -21,11 +21,15 @@ repov /path/to/repo
 |-----|--------|
 | `Tab` / `Shift+Tab` | Switch panel (Refs → History → Files) |
 | `j` / `k` | Move up/down |
+| `g` / `G` | Jump to top / bottom of list |
+| `PgUp` / `PgDn` | Page up / down |
+| `/` or `f` | Search commits (message, author, sha) |
 | `Enter` | Open commit or file diff |
-| `c` | Toggle changed files / all files |
+| `c` | Cycle files: changed → all → working tree |
 | `y` | Copy commit SHA to clipboard |
 | `r` | Reload repository |
-| `Esc` | Close diff view |
+| `?` | Toggle help overlay |
+| `Esc` | Close diff / search / help |
 | `q` | Quit |
 
 ## License

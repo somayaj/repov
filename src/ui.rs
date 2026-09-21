@@ -2,25 +2,35 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, StatefulWidget, Wrap},
     Frame,
 };
 
 use crate::app::{App, FilesMode, Panel};
 use crate::diff::styled_line;
-use crate::repo::ChangeStatus;
+use crate::repo::{ChangeStatus, RefKind};
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    let bottom: Vec<Constraint> = if app.search_input().is_some() {
+        vec![Constraint::Length(1), Constraint::Length(1)]
+    } else {
+        vec![Constraint::Length(1)]
+    };
+
+    let mut constraints = vec![Constraint::Min(1)];
+    constraints.extend(bottom);
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(1)])
+        .constraints(constraints)
         .split(frame.area());
+
+    let main_area = chunks[0];
 
     if app.diff_is_open() {
         let overlay = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(35), Constraint::Percentage(65)])
-            .split(chunks[0]);
+            .split(main_area);
 
         let main = Layout::default()
             .direction(Direction::Horizontal)
@@ -40,7 +50,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         let main = Layout::default()
             .direction(Direction::Horizontal)
             .constraints([Constraint::Percentage(18), Constraint::Percentage(82)])
-            .split(chunks[0]);
+            .split(main_area);
 
         let right = Layout::default()
             .direction(Direction::Vertical)
@@ -52,7 +62,16 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         draw_files(frame, app, right[1]);
     }
 
-    draw_status(frame, app, chunks[1]);
+    if app.search_input().is_some() {
+        draw_search_bar(frame, app, chunks[1]);
+        draw_status(frame, app, chunks[2]);
+    } else {
+        draw_status(frame, app, chunks[1]);
+    }
+
+    if app.show_help() {
+        draw_help(frame);
+    }
 }
 
 fn panel_style(active: bool) -> Style {
@@ -68,27 +87,37 @@ fn panel_style(active: bool) -> Style {
 fn draw_refs(frame: &mut Frame, app: &App, area: Rect) {
     let active = app.panel() == Panel::Refs;
     let items: Vec<ListItem> = app
-        .branches()
+        .refs()
         .iter()
         .enumerate()
-        .map(|(i, branch)| {
-            let marker = if branch.is_head { "HEAD " } else { "     " };
-            let style = if i == app.branch_index() && active {
+        .map(|(i, ref_entry)| {
+            let (marker, base_style) = match ref_entry.kind {
+                RefKind::Branch { is_head, is_remote } => {
+                    let marker = if is_head { "HEAD " } else { "     " };
+                    let style = if is_remote {
+                        Style::default().fg(Color::Magenta)
+                    } else if is_head {
+                        Style::default().fg(Color::Green)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+                    (marker, style)
+                }
+                RefKind::Tag => (" tag ", Style::default().fg(Color::Yellow)),
+            };
+
+            let style = if i == app.ref_index() && active {
                 Style::default().bg(Color::DarkGray).fg(Color::Yellow)
-            } else if i == app.branch_index() {
+            } else if i == app.ref_index() {
                 Style::default().fg(Color::Yellow)
-            } else if branch.is_head {
-                Style::default().fg(Color::Green)
-            } else if branch.is_remote {
-                Style::default().fg(Color::Magenta)
             } else {
-                Style::default().fg(Color::White)
+                base_style
             };
 
             ListItem::new(Line::from(vec![
                 Span::styled(marker, style),
-                Span::styled(format!("{} ", branch.short_id), style.fg(Color::Cyan)),
-                Span::styled(branch.name.clone(), style),
+                Span::styled(format!("{} ", ref_entry.short_id), style.fg(Color::Cyan)),
+                Span::styled(ref_entry.name.clone(), style),
             ]))
         })
         .collect();
@@ -99,15 +128,26 @@ fn draw_refs(frame: &mut Frame, app: &App, area: Rect) {
         .border_style(panel_style(active));
 
     let list = List::new(items).block(block);
-    frame.render_widget(list, area);
+    render_list(
+        frame,
+        area,
+        list,
+        app.ref_index(),
+        app.list_scroll(),
+        !app.refs().is_empty(),
+        app.panel() == Panel::Refs,
+    );
 }
 
 fn draw_history(frame: &mut Frame, app: &App, area: Rect) {
     let active = app.panel() == Panel::History;
-    let branch_name = app
-        .selected_branch()
-        .map(|b| b.name.as_str())
-        .unwrap_or("?");
+    let ref_name = app.selected_ref().map(|r| r.name.as_str()).unwrap_or("?");
+    let filter = app.search_query();
+    let title = if filter.is_empty() {
+        format!(" History — {ref_name} ")
+    } else {
+        format!(" History — {ref_name} (filter: {filter}) ")
+    };
 
     let items: Vec<ListItem> = app
         .commits()
@@ -140,12 +180,20 @@ fn draw_history(frame: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     let block = Block::default()
-        .title(format!(" History — {branch_name} "))
+        .title(title)
         .borders(Borders::ALL)
         .border_style(panel_style(active));
 
     let list = List::new(items).block(block);
-    frame.render_widget(list, area);
+    render_list(
+        frame,
+        area,
+        list,
+        app.commit_index(),
+        app.list_scroll(),
+        !app.commits().is_empty(),
+        active,
+    );
 }
 
 fn draw_files(frame: &mut Frame, app: &App, area: Rect) {
@@ -154,12 +202,17 @@ fn draw_files(frame: &mut Frame, app: &App, area: Rect) {
     let mode_label = match app.files_mode() {
         FilesMode::All => "All Files",
         FilesMode::Changed => "Changed Files",
+        FilesMode::Working => "Working Tree",
     };
 
     let items: Vec<ListItem> = files
         .iter()
         .enumerate()
         .map(|(i, entry)| {
+            if app.files_mode() == FilesMode::Working {
+                return draw_worktree_item(i, entry, active, app.file_index());
+            }
+
             let (prefix, change_style) = match entry.change {
                 Some(ChangeStatus::Added) => ("+ ", Style::default().fg(Color::Green)),
                 Some(ChangeStatus::Modified) => ("M ", Style::default().fg(Color::Yellow)),
@@ -188,23 +241,87 @@ fn draw_files(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let title = app
-        .selected_commit()
-        .map(|c| format!(" {mode_label} @ {} ", c.short_id))
-        .unwrap_or_else(|| format!(" {mode_label} "));
+    let title = match app.files_mode() {
+        FilesMode::Working => format!(" {mode_label} — {} ", app.work_tree_summary()),
+        _ => app
+            .selected_commit()
+            .map(|c| format!(" {mode_label} @ {} ", c.short_id))
+            .unwrap_or_else(|| format!(" {mode_label} ")),
+    };
 
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
         .border_style(panel_style(active));
 
+    let empty_msg = match app.files_mode() {
+        FilesMode::Working => "(working tree clean)",
+        _ => "(no files — try c to toggle all/changed/working)",
+    };
+
     let list = if items.is_empty() {
-        List::new(vec![ListItem::new("(no files — try c to toggle all/changed)")]).block(block)
+        List::new(vec![ListItem::new(empty_msg)]).block(block)
     } else {
         List::new(items).block(block)
     };
 
-    frame.render_widget(list, area);
+    render_list(
+        frame,
+        area,
+        list,
+        app.file_index(),
+        app.list_scroll(),
+        !files.is_empty(),
+        active,
+    );
+}
+
+fn render_list(
+    frame: &mut Frame,
+    area: Rect,
+    list: List,
+    selected: usize,
+    scroll: usize,
+    has_items: bool,
+    highlight: bool,
+) {
+    let mut state = ListState::default();
+    if highlight && has_items {
+        state.select(Some(selected));
+    }
+    *state.offset_mut() = scroll;
+    StatefulWidget::render(list, area, frame.buffer_mut(), &mut state);
+}
+
+fn draw_worktree_item(
+    i: usize,
+    entry: &crate::repo::TreeEntry,
+    active: bool,
+    file_index: usize,
+) -> ListItem<'static> {
+    let staged = status_label(entry.wt_staged);
+    let unstaged = status_label(entry.wt_unstaged);
+    let style = if i == file_index && active {
+        Style::default().bg(Color::DarkGray).fg(Color::Yellow)
+    } else {
+        file_style(&entry.path)
+    };
+
+    ListItem::new(Line::from(vec![
+        Span::styled(format!("S{staged} "), Style::default().fg(Color::Green)),
+        Span::styled(format!("U{unstaged} ",), Style::default().fg(Color::Red)),
+        Span::styled(entry.path.clone(), style),
+    ]))
+}
+
+fn status_label(status: Option<ChangeStatus>) -> &'static str {
+    match status {
+        Some(ChangeStatus::Added) => "+",
+        Some(ChangeStatus::Modified) => "M",
+        Some(ChangeStatus::Deleted) => "-",
+        Some(ChangeStatus::Renamed) => "R",
+        None => " ",
+    }
 }
 
 fn draw_diff(frame: &mut Frame, app: &App, area: Rect) {
@@ -226,9 +343,77 @@ fn draw_diff(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
+fn draw_search_bar(frame: &mut Frame, app: &App, area: Rect) {
+    let query = app.search_input().unwrap_or("");
+    let bar = Paragraph::new(format!(" / {query}_ "))
+        .style(Style::default().fg(Color::Black).bg(Color::Cyan));
+    frame.render_widget(bar, area);
+}
+
 fn draw_status(frame: &mut Frame, app: &mut App, area: Rect) {
     let status = Paragraph::new(app.status_line()).style(Style::default().fg(Color::DarkGray));
     frame.render_widget(status, area);
+}
+
+fn draw_help(frame: &mut Frame) {
+    let area = centered_rect(70, 70, frame.area());
+    frame.render_widget(Clear, area);
+
+    let text = vec![
+        Line::from(Span::styled(" repov — key bindings ", Style::default().add_modifier(Modifier::BOLD))),
+        Line::from(""),
+        Line::from(" Navigation"),
+        Line::from("   Tab / Shift+Tab   switch panel (Refs → History → Files)"),
+        Line::from("   j / k             move up / down"),
+        Line::from("   g / G             jump to top / bottom of list"),
+        Line::from("   PgUp / PgDn       page up / down"),
+        Line::from(""),
+        Line::from(" Search & view"),
+        Line::from("   / or f            search commits (message, author, sha)"),
+        Line::from("   Enter             open diff (History / Files)"),
+        Line::from("   c                 cycle files: changed → all → working tree"),
+        Line::from("   y                 copy commit SHA"),
+        Line::from("   Esc               close diff / search / help"),
+        Line::from(""),
+        Line::from(" Other"),
+        Line::from("   r                 reload repository"),
+        Line::from("   ?                 toggle this help"),
+        Line::from("   q / Ctrl+C        quit"),
+        Line::from(""),
+        Line::from(" Refs panel shows branches (green=HEAD, magenta=remote) and tags (yellow)."),
+        Line::from(" Working tree mode (c) shows staged (S) and unstaged (U) changes."),
+    ];
+
+    let help = Paragraph::new(text)
+        .block(
+            Block::default()
+                .title(" Help ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan)),
+        )
+        .wrap(Wrap { trim: true });
+
+    frame.render_widget(help, area);
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
+    let popup = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(area);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup[1])[1]
 }
 
 fn file_style(path: &str) -> Style {
