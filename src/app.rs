@@ -67,6 +67,7 @@ pub struct App {
     search_query: String,
     show_help: bool,
     first_parent: bool,
+    show_graph: bool,
     layout: LayoutSizes,
 }
 
@@ -95,6 +96,7 @@ impl App {
             search_query: String::new(),
             show_help: false,
             first_parent: false,
+            show_graph: true,
             layout: LayoutSizes::default(),
         };
         app.refresh_history()?;
@@ -138,6 +140,20 @@ impl App {
 
     pub fn first_parent(&self) -> bool {
         self.first_parent
+    }
+
+    pub fn show_graph(&self) -> bool {
+        self.show_graph
+    }
+
+    pub fn toggle_graph(&mut self) {
+        self.show_graph = !self.show_graph;
+        let msg = if self.show_graph {
+            "Graph shown (h to hide)"
+        } else {
+            "Graph hidden (h to show)"
+        };
+        self.set_flash(msg);
     }
 
     pub fn layout(&self) -> LayoutSizes {
@@ -681,7 +697,7 @@ impl App {
         };
 
         format!(
-            "repov | {} | {ref_name} | {id} | {author} | {date} | {files_mode} | wt: {}{search} | b: branch line | / f ? help",
+            "repov | {} | {ref_name} | {id} | {author} | {date} | {files_mode} | wt: {}{search} | h: graph | / f ? help",
             self.data.repo_name,
             self.data.work_tree_summary
         )

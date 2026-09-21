@@ -108,6 +108,7 @@ fn run_loop(
                     KeyCode::Char('c') => app.toggle_files_mode(),
                     KeyCode::Char('b') => app.show_branch_line(),
                     KeyCode::Char('p') => app.toggle_first_parent(),
+                    KeyCode::Char('h') => app.toggle_graph(),
                     KeyCode::Char('[') => app.adjust_refs_width(-2),
                     KeyCode::Char(']') => app.adjust_refs_width(2),
                     KeyCode::Char('-') => app.adjust_history_height(-5),

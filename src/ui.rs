@@ -169,7 +169,9 @@ fn draw_history(frame: &mut Frame, app: &App, area: Rect) {
     let active = app.panel() == Panel::History;
     let ref_name = app.selected_ref().map(|r| r.name.as_str()).unwrap_or("?");
     let filter = app.search_query();
-    let graph_mode = if app.first_parent() {
+    let graph_mode = if !app.show_graph() {
+        "no graph"
+    } else if app.first_parent() {
         "branch line"
     } else {
         "full graph"
@@ -180,14 +182,17 @@ fn draw_history(frame: &mut Frame, app: &App, area: Rect) {
         format!(" History — {ref_name} ({graph_mode}, filter: {filter}) ")
     };
 
-    let graph_width = app
-        .commits()
-        .iter()
-        .enumerate()
-        .map(|(i, _)| app.graph_line(i).len())
-        .max()
-        .unwrap_or(4)
-        .clamp(4, 16);
+    let graph_width = if app.show_graph() {
+        app.commits()
+            .iter()
+            .enumerate()
+            .map(|(i, _)| app.graph_line(i).len())
+            .max()
+            .unwrap_or(4)
+            .clamp(4, 16)
+    } else {
+        0
+    };
 
     let tip_oid = app.branch_tip_oid();
 
@@ -196,7 +201,6 @@ fn draw_history(frame: &mut Frame, app: &App, area: Rect) {
         .iter()
         .enumerate()
         .map(|(i, commit)| {
-            let graph = app.graph_line(i);
             let is_tip = tip_oid.is_some_and(|tip| tip == commit.oid);
             let tip_marker = if is_tip { "@" } else { " " };
             let labels = if commit.branch_labels.is_empty() {
@@ -213,18 +217,28 @@ fn draw_history(frame: &mut Frame, app: &App, area: Rect) {
                 Style::default()
             };
 
-            ListItem::new(Line::from(vec![
-                Span::styled(
+            let mut spans = Vec::new();
+            if app.show_graph() {
+                let graph = app.graph_line(i);
+                spans.push(Span::styled(
                     format!("{tip_marker}{graph:>graph_width$} "),
                     Style::default().fg(if is_tip { Color::Green } else { Color::Magenta }),
-                ),
+                ));
+            } else {
+                spans.push(Span::styled(
+                    format!("{tip_marker} "),
+                    Style::default().fg(if is_tip { Color::Green } else { Color::DarkGray }),
+                ));
+            }
+            spans.extend([
                 Span::styled(format!("{:<12}", commit.date), style.fg(Color::DarkGray)),
                 Span::styled(format!("{:<14}", truncate(&commit.author, 14)), style),
                 Span::styled(commit.short_id.clone(), style.fg(Color::Cyan)),
                 Span::raw(" "),
                 Span::styled(commit.message.clone(), style.fg(Color::White)),
                 Span::styled(labels, style.fg(Color::Blue)),
-            ]))
+            ]);
+            ListItem::new(Line::from(spans))
         })
         .collect();
 
@@ -422,6 +436,7 @@ fn draw_help(frame: &mut Frame) {
         Line::from("   Enter             open diff (History / Files)"),
         Line::from("   b                 branch line view (linear branch history)"),
         Line::from("   p                 toggle branch line / full merge graph"),
+        Line::from("   h                 show / hide commit graph column"),
         Line::from("   c                 cycle files: changed → all → working tree"),
         Line::from("   y                 copy commit SHA"),
         Line::from("   Esc               close diff / search / help"),
