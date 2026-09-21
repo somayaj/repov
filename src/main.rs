@@ -60,6 +60,29 @@ fn run_loop(
                     break;
                 }
 
+                if app.search_input().is_some() {
+                    match key.code {
+                        KeyCode::Esc => app.cancel_search(),
+                        KeyCode::Enter => app.apply_search(),
+                        KeyCode::Backspace => app.search_backspace(),
+                        KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                            app.clear_search();
+                        }
+                        KeyCode::Char(c) => app.search_push(c),
+                        _ => {}
+                    }
+                    continue;
+                }
+
+                if app.show_help() {
+                    match key.code {
+                        KeyCode::Esc | KeyCode::Char('?') => app.close_help(),
+                        KeyCode::Char('q') => break,
+                        _ => {}
+                    }
+                    continue;
+                }
+
                 if app.diff_is_open() {
                     match key.code {
                         KeyCode::Esc => app.close_diff(),
@@ -76,6 +99,12 @@ fn run_loop(
                     KeyCode::Char('r') => app.reload()?,
                     KeyCode::Char('c') => app.toggle_files_mode(),
                     KeyCode::Char('y') => app.copy_sha(),
+                    KeyCode::Char('?') => app.toggle_help(),
+                    KeyCode::Char('/') => app.start_search(),
+                    KeyCode::Char('g') => app.jump_top(),
+                    KeyCode::Char('G') => app.jump_bottom(),
+                    KeyCode::PageUp => app.page_up(),
+                    KeyCode::PageDown => app.page_down(),
                     KeyCode::Tab => app.next_panel(),
                     KeyCode::BackTab => app.prev_panel(),
                     KeyCode::Char('j') | KeyCode::Down => app.move_down(),
@@ -85,6 +114,11 @@ fn run_loop(
                         app::Panel::Files => app.open_file_diff()?,
                         app::Panel::Refs => {}
                     },
+                    KeyCode::Esc => {
+                        if !app.search_query().is_empty() {
+                            app.clear_search();
+                        }
+                    }
                     _ => {}
                 }
             }

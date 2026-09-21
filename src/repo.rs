@@ -13,14 +13,22 @@ pub enum ChangeStatus {
     Renamed,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum RefKind {
+    Branch { is_head: bool, is_remote: bool },
+    Tag,
+}
+
 #[derive(Clone)]
-pub struct BranchInfo {
+pub struct RefEntry {
+    pub kind: RefKind,
     pub name: String,
     pub short_id: String,
     pub tip_oid: String,
-    pub is_head: bool,
-    pub is_remote: bool,
 }
+
+/// Alias kept for minimal churn in call sites.
+pub type BranchInfo = RefEntry;
 
 #[derive(Clone)]
 pub struct TreeEntry {
@@ -28,6 +36,8 @@ pub struct TreeEntry {
     pub display: String,
     pub is_dir: bool,
     pub change: Option<ChangeStatus>,
+    pub wt_staged: Option<ChangeStatus>,
+    pub wt_unstaged: Option<ChangeStatus>,
 }
 
 #[derive(Clone)]
@@ -43,8 +53,9 @@ pub struct CommitInfo {
 
 pub struct RepoData {
     pub repo_name: String,
-    pub branches: Vec<BranchInfo>,
-    head_branch_index: usize,
+    pub refs: Vec<RefEntry>,
+    head_ref_index: usize,
+    pub work_tree_summary: String,
 }
 
 impl RepoData {
@@ -61,18 +72,29 @@ impl RepoData {
             .ok()
             .and_then(|h| h.shorthand().map(String::from));
 
-        let branches = load_branches(&repo, &head_name)?;
-        let head_branch_index = branches.iter().position(|b| b.is_head).unwrap_or(0);
+        let mut refs = load_branches(&repo, &head_name)?;
+        refs.extend(load_tags(&repo)?);
+        let head_ref_index = refs
+            .iter()
+            .position(|r| matches!(r.kind, RefKind::Branch { is_head: true, .. }))
+            .unwrap_or(0);
+        let work_tree_summary = summarize_work_tree(&repo)?;
 
         Ok(Self {
             repo_name,
-            branches,
-            head_branch_index,
+            refs,
+            head_ref_index,
+            work_tree_summary,
         })
     }
 
     pub fn head_branch_index(&self) -> usize {
-        self.head_branch_index
+        self.head_ref_index
+    }
+
+    pub fn load_working_tree(repo_path: &str) -> Result<Vec<TreeEntry>> {
+        let repo = Repository::open(repo_path).context("failed to open repository")?;
+        load_working_tree_entries(&repo)
     }
 
     pub fn load_history(
@@ -166,7 +188,7 @@ fn commit_to_info(
     }
 }
 
-fn load_branches(repo: &Repository, head_name: &Option<String>) -> Result<Vec<BranchInfo>> {
+fn load_branches(repo: &Repository, head_name: &Option<String>) -> Result<Vec<RefEntry>> {
     let mut branches = Vec::new();
 
     for branch_type in [BranchType::Local, BranchType::Remote] {
@@ -184,18 +206,122 @@ fn load_branches(repo: &Repository, head_name: &Option<String>) -> Result<Vec<Br
                 })
                 .unwrap_or_else(|_| ("???????".to_string(), String::new()));
 
-            branches.push(BranchInfo {
+            branches.push(RefEntry {
+                kind: RefKind::Branch { is_head, is_remote },
                 name,
                 short_id,
                 tip_oid,
-                is_head,
-                is_remote,
             });
         }
     }
 
     branches.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(branches)
+}
+
+fn load_tags(repo: &Repository) -> Result<Vec<RefEntry>> {
+    let mut tags = Vec::new();
+
+    repo.tag_names(None)?.iter().for_each(|name| {
+        if let Ok(reference) = repo.find_reference(&format!("refs/tags/{name}")) {
+            if let Ok(obj) = reference.peel_to_commit() {
+                let id = obj.id().to_string();
+                tags.push(RefEntry {
+                    kind: RefKind::Tag,
+                    name: name.to_string(),
+                    short_id: id[..7].to_string(),
+                    tip_oid: id,
+                });
+            }
+        }
+    });
+
+    tags.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(tags)
+}
+
+fn summarize_work_tree(repo: &Repository) -> Result<String> {
+    let entries = load_working_tree_entries(repo)?;
+    if entries.is_empty() {
+        return Ok("clean".to_string());
+    }
+    let staged = entries.iter().filter(|e| e.wt_staged.is_some()).count();
+    let unstaged = entries.iter().filter(|e| e.wt_unstaged.is_some()).count();
+    Ok(format!("{staged} staged, {unstaged} unstaged"))
+}
+
+fn load_working_tree_entries(repo: &Repository) -> Result<Vec<TreeEntry>> {
+    let mut opts = git2::StatusOptions::new();
+    opts.include_untracked(true)
+        .recurse_untracked_dirs(false)
+        .renames_head_to_index(true)
+        .renames_index_to_workdir(true);
+
+    let statuses = repo.statuses(Some(&mut opts))?;
+    let mut entries = Vec::new();
+
+    for entry in statuses.iter() {
+        let path = entry
+            .path()
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| "?".to_string());
+        let status = entry.status();
+        let wt_staged = status_index_change(status);
+        let wt_unstaged = status_workdir_change(status);
+
+        if wt_staged.is_none() && wt_unstaged.is_none() {
+            continue;
+        }
+
+        let display = match (&wt_staged, &wt_unstaged) {
+            (Some(_), Some(_)) => format!("{path} (staged + unstaged)"),
+            _ => path.clone(),
+        };
+
+        entries.push(TreeEntry {
+            path: path.clone(),
+            display,
+            is_dir: false,
+            change: wt_unstaged.or(wt_staged),
+            wt_staged,
+            wt_unstaged,
+        });
+    }
+
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(entries)
+}
+
+fn status_index_change(status: git2::Status) -> Option<ChangeStatus> {
+    if status.contains(git2::Status::INDEX_NEW) {
+        Some(ChangeStatus::Added)
+    } else if status.contains(git2::Status::INDEX_MODIFIED) {
+        Some(ChangeStatus::Modified)
+    } else if status.contains(git2::Status::INDEX_DELETED) {
+        Some(ChangeStatus::Deleted)
+    } else if status.contains(git2::Status::INDEX_RENAMED) {
+        Some(ChangeStatus::Renamed)
+    } else if status.contains(git2::Status::INDEX_TYPECHANGE) {
+        Some(ChangeStatus::Modified)
+    } else {
+        None
+    }
+}
+
+fn status_workdir_change(status: git2::Status) -> Option<ChangeStatus> {
+    if status.contains(git2::Status::WT_NEW) {
+        Some(ChangeStatus::Added)
+    } else if status.contains(git2::Status::WT_MODIFIED) {
+        Some(ChangeStatus::Modified)
+    } else if status.contains(git2::Status::WT_DELETED) {
+        Some(ChangeStatus::Deleted)
+    } else if status.contains(git2::Status::WT_RENAMED) {
+        Some(ChangeStatus::Renamed)
+    } else if status.contains(git2::Status::WT_TYPECHANGE) {
+        Some(ChangeStatus::Modified)
+    } else {
+        None
+    }
 }
 
 fn walk_commits(
@@ -277,6 +403,8 @@ fn load_changed_entries(repo: &Repository, commit: &git2::Commit) -> Result<Vec<
                 display: path,
                 is_dir,
                 change: Some(status),
+                wt_staged: None,
+                wt_unstaged: None,
             });
             true
         },
@@ -317,6 +445,8 @@ fn flatten_tree(
             display: format!("{}{}", path_str, suffix),
             is_dir,
             change,
+            wt_staged: None,
+            wt_unstaged: None,
         });
 
         if is_dir {
