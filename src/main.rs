@@ -98,6 +98,8 @@ fn run_loop(
                     KeyCode::Char('q') => break,
                     KeyCode::Char('r') => app.reload()?,
                     KeyCode::Char('c') => app.toggle_files_mode(),
+                    KeyCode::Char('b') => app.show_branch_line(),
+                    KeyCode::Char('p') => app.toggle_first_parent(),
                     KeyCode::Char('y') => app.copy_sha(),
                     KeyCode::Char('?') => app.toggle_help(),
                     KeyCode::Char('/') | KeyCode::Char('f') => app.start_search(),
@@ -112,7 +114,7 @@ fn run_loop(
                     KeyCode::Enter => match app.panel() {
                         app::Panel::History => app.open_commit_diff()?,
                         app::Panel::Files => app.open_file_diff()?,
-                        app::Panel::Refs => {}
+                        app::Panel::Refs => app.select_ref_on_enter(),
                     },
                     KeyCode::Esc => {
                         if !app.search_query().is_empty() {

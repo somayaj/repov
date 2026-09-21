@@ -10,6 +10,16 @@ use crate::app::{App, FilesMode, Panel};
 use crate::diff::styled_line;
 use crate::repo::{ChangeStatus, RefKind};
 
+const PAGE_SIZE: usize = 10;
+
+fn scroll_for(selected: usize) -> usize {
+    if selected >= PAGE_SIZE {
+        selected.saturating_sub(PAGE_SIZE / 2)
+    } else {
+        0
+    }
+}
+
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let bottom: Vec<Constraint> = if app.search_input().is_some() {
         vec![Constraint::Length(1), Constraint::Length(1)]
@@ -133,7 +143,7 @@ fn draw_refs(frame: &mut Frame, app: &App, area: Rect) {
         area,
         list,
         app.ref_index(),
-        app.list_scroll(),
+        scroll_for(app.ref_index()),
         !app.refs().is_empty(),
         app.panel() == Panel::Refs,
     );
@@ -143,11 +153,27 @@ fn draw_history(frame: &mut Frame, app: &App, area: Rect) {
     let active = app.panel() == Panel::History;
     let ref_name = app.selected_ref().map(|r| r.name.as_str()).unwrap_or("?");
     let filter = app.search_query();
-    let title = if filter.is_empty() {
-        format!(" History — {ref_name} ")
+    let graph_mode = if app.first_parent() {
+        "branch line"
     } else {
-        format!(" History — {ref_name} (filter: {filter}) ")
+        "full graph"
     };
+    let title = if filter.is_empty() {
+        format!(" History — {ref_name} ({graph_mode}) ")
+    } else {
+        format!(" History — {ref_name} ({graph_mode}, filter: {filter}) ")
+    };
+
+    let graph_width = app
+        .commits()
+        .iter()
+        .enumerate()
+        .map(|(i, _)| app.graph_line(i).len())
+        .max()
+        .unwrap_or(4)
+        .clamp(4, 16);
+
+    let tip_oid = app.branch_tip_oid();
 
     let items: Vec<ListItem> = app
         .commits()
@@ -155,6 +181,8 @@ fn draw_history(frame: &mut Frame, app: &App, area: Rect) {
         .enumerate()
         .map(|(i, commit)| {
             let graph = app.graph_line(i);
+            let is_tip = tip_oid.is_some_and(|tip| tip == commit.oid);
+            let tip_marker = if is_tip { "@" } else { " " };
             let labels = if commit.branch_labels.is_empty() {
                 String::new()
             } else {
@@ -163,12 +191,17 @@ fn draw_history(frame: &mut Frame, app: &App, area: Rect) {
 
             let style = if i == app.commit_index() && active {
                 Style::default().bg(Color::DarkGray).fg(Color::Yellow)
+            } else if is_tip {
+                Style::default().fg(Color::Green)
             } else {
                 Style::default()
             };
 
             ListItem::new(Line::from(vec![
-                Span::styled(format!("{:<8}", graph), Style::default().fg(Color::Magenta)),
+                Span::styled(
+                    format!("{tip_marker}{graph:>graph_width$} "),
+                    Style::default().fg(if is_tip { Color::Green } else { Color::Magenta }),
+                ),
                 Span::styled(format!("{:<12}", commit.date), style.fg(Color::DarkGray)),
                 Span::styled(format!("{:<14}", truncate(&commit.author, 14)), style),
                 Span::styled(commit.short_id.clone(), style.fg(Color::Cyan)),
@@ -190,7 +223,7 @@ fn draw_history(frame: &mut Frame, app: &App, area: Rect) {
         area,
         list,
         app.commit_index(),
-        app.list_scroll(),
+        scroll_for(app.commit_index()),
         !app.commits().is_empty(),
         active,
     );
@@ -270,7 +303,7 @@ fn draw_files(frame: &mut Frame, app: &App, area: Rect) {
         area,
         list,
         app.file_index(),
-        app.list_scroll(),
+        scroll_for(app.file_index()),
         !files.is_empty(),
         active,
     );
@@ -371,6 +404,8 @@ fn draw_help(frame: &mut Frame) {
         Line::from(" Search & view"),
         Line::from("   / or f            search commits (message, author, sha)"),
         Line::from("   Enter             open diff (History / Files)"),
+        Line::from("   b                 branch line view (linear branch history)"),
+        Line::from("   p                 toggle branch line / full merge graph"),
         Line::from("   c                 cycle files: changed → all → working tree"),
         Line::from("   y                 copy commit SHA"),
         Line::from("   Esc               close diff / search / help"),
@@ -380,7 +415,8 @@ fn draw_help(frame: &mut Frame) {
         Line::from("   ?                 toggle this help"),
         Line::from("   q / Ctrl+C        quit"),
         Line::from(""),
-        Line::from(" Refs panel shows branches (green=HEAD, magenta=remote) and tags (yellow)."),
+        Line::from(" Refs: pick a branch (j/k) — History updates automatically. @ = branch tip."),
+        Line::from(" Branches: green=HEAD, magenta=remote, yellow=tag. Enter on Refs → History."),
         Line::from(" Working tree mode (c) shows staged (S) and unstaged (U) changes."),
     ];
 

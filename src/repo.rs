@@ -98,10 +98,11 @@ impl RepoData {
         repo_path: &str,
         tip_oid: &str,
         limit: usize,
+        first_parent: bool,
     ) -> Result<(Vec<CommitInfo>, Vec<crate::graph::GraphLine>)> {
         let repo = Repository::open(repo_path).context("failed to open repository")?;
         let tip = Oid::from_str(tip_oid).context("invalid branch tip")?;
-        let raw_commits = walk_commits(&repo, vec![tip], limit)?;
+        let raw_commits = walk_commits(&repo, vec![tip], limit, first_parent)?;
         let branch_map = ref_labels_for_commits(&repo, &raw_commits)?;
 
         let commits = raw_commits
@@ -332,6 +333,7 @@ fn walk_commits(
     repo: &Repository,
     start_oids: Vec<Oid>,
     limit: usize,
+    first_parent: bool,
 ) -> Result<Vec<git2::Commit<'_>>> {
     let mut seen = HashSet::new();
     let mut queue: VecDeque<Oid> = start_oids.into_iter().collect();
@@ -344,8 +346,14 @@ fn walk_commits(
         seen.insert(oid);
 
         let commit = repo.find_commit(oid)?;
-        for parent in commit.parents() {
-            queue.push_back(parent.id());
+        if first_parent {
+            if commit.parent_count() > 0 {
+                queue.push_back(commit.parent(0)?.id());
+            }
+        } else {
+            for parent in commit.parents() {
+                queue.push_back(parent.id());
+            }
         }
         commits.push(commit);
     }
@@ -546,7 +554,22 @@ fn patch_to_string(diff: &Diff) -> Result<String> {
 }
 
 fn format_time(seconds: i64) -> String {
-    use std::time::{Duration, UNIX_EPOCH};
-    let datetime = UNIX_EPOCH + Duration::from_secs(seconds as u64);
-    format!("{:?}", datetime).replace(" 00:00:00 UTC", "")
+    let days = seconds.max(0) / 86_400;
+    let (year, month, day) = civil_from_days(days);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+/// Convert days since Unix epoch to (year, month, day).
+fn civil_from_days(days: i64) -> (i32, u32, u32) {
+    let z = days + 719_468;
+    let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
+    let doe = (z - era * 146_097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let year = (yoe as i64 + era * 400) as i32;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = if mp < 10 { year } else { year + 1 };
+    (year, month, day)
 }

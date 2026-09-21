@@ -41,9 +41,9 @@ pub fn render_graph(commits: &[CommitNode]) -> Vec<GraphLine> {
         let mut parts = Vec::with_capacity(lanes.len());
         for (i, lane) in lanes.iter().enumerate() {
             let ch = if i == col {
-                '*'
+                '●'
             } else if lane.is_some() {
-                '|'
+                '│'
             } else {
                 ' '
             };
