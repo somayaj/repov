@@ -30,6 +30,23 @@ pub struct DiffView {
 
 const PAGE_SIZE: usize = 10;
 
+#[derive(Clone, Copy)]
+pub struct LayoutSizes {
+    pub refs_pct: u16,
+    pub history_pct: u16,
+    pub diff_top_pct: u16,
+}
+
+impl Default for LayoutSizes {
+    fn default() -> Self {
+        Self {
+            refs_pct: 18,
+            history_pct: 62,
+            diff_top_pct: 35,
+        }
+    }
+}
+
 pub struct App {
     repo_path: String,
     data: RepoData,
@@ -49,7 +66,8 @@ pub struct App {
     search_input: Option<String>,
     search_query: String,
     show_help: bool,
-    list_scroll: usize,
+    first_parent: bool,
+    layout: LayoutSizes,
 }
 
 impl App {
@@ -76,7 +94,8 @@ impl App {
             search_input: None,
             search_query: String::new(),
             show_help: false,
-            list_scroll: 0,
+            first_parent: false,
+            layout: LayoutSizes::default(),
         };
         app.refresh_history()?;
         app.load_selected_files()?;
@@ -113,12 +132,74 @@ impl App {
         &self.search_query
     }
 
-    pub fn list_scroll(&self) -> usize {
-        self.list_scroll
-    }
-
     pub fn toggle_help(&mut self) {
         self.show_help = !self.show_help;
+    }
+
+    pub fn first_parent(&self) -> bool {
+        self.first_parent
+    }
+
+    pub fn layout(&self) -> LayoutSizes {
+        self.layout
+    }
+
+    pub fn adjust_refs_width(&mut self, delta: i16) {
+        let next = self.layout.refs_pct as i16 + delta;
+        self.layout.refs_pct = next.clamp(12, 35) as u16;
+    }
+
+    pub fn adjust_history_height(&mut self, delta: i16) {
+        let next = self.layout.history_pct as i16 + delta;
+        self.layout.history_pct = next.clamp(35, 85) as u16;
+    }
+
+    pub fn adjust_diff_height(&mut self, delta: i16) {
+        let next = self.layout.diff_top_pct as i16 + delta;
+        self.layout.diff_top_pct = next.clamp(20, 70) as u16;
+    }
+
+    pub fn toggle_first_parent(&mut self) {
+        self.first_parent = !self.first_parent;
+        self.panel = Panel::History;
+        let _ = self.refresh_history();
+        let _ = self.load_selected_files();
+        let mode = if self.first_parent {
+            "branch line"
+        } else {
+            "full graph"
+        };
+        self.set_flash(&format!("History: {mode} (p or b to toggle)"));
+    }
+
+    pub fn show_branch_line(&mut self) {
+        if !self.first_parent {
+            self.first_parent = true;
+            let _ = self.refresh_history();
+            let _ = self.load_selected_files();
+        }
+        self.panel = Panel::History;
+        self.commit_index = 0;
+        self.set_flash("Branch line view — p toggles full merge graph");
+    }
+
+    pub fn branch_tip_oid(&self) -> Option<&str> {
+        self.selected_ref().map(|r| r.tip_oid.as_str())
+    }
+
+    fn select_ref(&mut self, index: usize) {
+        if index < self.data.refs.len() {
+            self.ref_index = index;
+            self.commit_index = 0;
+            self.file_index = 0;
+            self.panel = Panel::History;
+            let _ = self.refresh_history();
+            let _ = self.load_selected_files();
+        }
+    }
+
+    pub fn select_ref_on_enter(&mut self) {
+        self.panel = Panel::History;
     }
 
     pub fn close_help(&mut self) {
@@ -247,17 +328,15 @@ impl App {
 
     pub fn jump_top(&mut self) {
         match self.panel {
-            Panel::Refs => self.ref_index = 0,
-            Panel::History => self.commit_index = 0,
-            Panel::Files => self.file_index = 0,
-        }
-        self.sync_scroll();
-        if self.panel == Panel::Refs {
-            let _ = self.refresh_history();
-            let _ = self.load_selected_files();
-        } else if self.panel == Panel::History {
-            self.file_index = 0;
-            let _ = self.load_selected_files();
+            Panel::Refs => self.select_ref(0),
+            Panel::History => {
+                self.commit_index = 0;
+                self.file_index = 0;
+                let _ = self.load_selected_files();
+            }
+            Panel::Files => {
+                self.file_index = 0;
+            }
         }
     }
 
@@ -265,12 +344,14 @@ impl App {
         match self.panel {
             Panel::Refs => {
                 if !self.data.refs.is_empty() {
-                    self.ref_index = self.data.refs.len() - 1;
+                    self.select_ref(self.data.refs.len() - 1);
                 }
             }
             Panel::History => {
                 if !self.display_commits.is_empty() {
                     self.commit_index = self.display_commits.len() - 1;
+                    self.file_index = 0;
+                    let _ = self.load_selected_files();
                 }
             }
             Panel::Files => {
@@ -279,30 +360,22 @@ impl App {
                 }
             }
         }
-        self.sync_scroll();
-        if self.panel == Panel::Refs {
-            let _ = self.refresh_history();
-            let _ = self.load_selected_files();
-        } else if self.panel == Panel::History {
-            self.file_index = 0;
-            let _ = self.load_selected_files();
-        }
     }
 
     pub fn page_up(&mut self) {
         match self.panel {
-            Panel::Refs => self.ref_index = self.ref_index.saturating_sub(PAGE_SIZE),
+            Panel::Refs => {
+                let next = self.ref_index.saturating_sub(PAGE_SIZE);
+                self.select_ref(next);
+            }
             Panel::History => {
                 self.commit_index = self.commit_index.saturating_sub(PAGE_SIZE);
                 self.file_index = 0;
                 let _ = self.load_selected_files();
             }
-            Panel::Files => self.file_index = self.file_index.saturating_sub(PAGE_SIZE),
-        }
-        self.sync_scroll();
-        if self.panel == Panel::Refs {
-            let _ = self.refresh_history();
-            let _ = self.load_selected_files();
+            Panel::Files => {
+                self.file_index = self.file_index.saturating_sub(PAGE_SIZE);
+            }
         }
     }
 
@@ -310,7 +383,8 @@ impl App {
         match self.panel {
             Panel::Refs => {
                 if !self.data.refs.is_empty() {
-                    self.ref_index = (self.ref_index + PAGE_SIZE).min(self.data.refs.len() - 1);
+                    let next = (self.ref_index + PAGE_SIZE).min(self.data.refs.len() - 1);
+                    self.select_ref(next);
                 }
             }
             Panel::History => {
@@ -326,24 +400,6 @@ impl App {
                     self.file_index = (self.file_index + PAGE_SIZE).min(self.files.len() - 1);
                 }
             }
-        }
-        self.sync_scroll();
-        if self.panel == Panel::Refs {
-            let _ = self.refresh_history();
-            let _ = self.load_selected_files();
-        }
-    }
-
-    fn sync_scroll(&mut self) {
-        let selected = match self.panel {
-            Panel::Refs => self.ref_index,
-            Panel::History => self.commit_index,
-            Panel::Files => self.file_index,
-        };
-        if selected >= PAGE_SIZE {
-            self.list_scroll = selected.saturating_sub(PAGE_SIZE / 2);
-        } else {
-            self.list_scroll = 0;
         }
     }
 
@@ -368,7 +424,6 @@ impl App {
             Panel::History => Panel::Files,
             Panel::Files => Panel::Refs,
         };
-        self.sync_scroll();
     }
 
     pub fn prev_panel(&mut self) {
@@ -377,7 +432,6 @@ impl App {
             Panel::History => Panel::Refs,
             Panel::Files => Panel::History,
         };
-        self.sync_scroll();
     }
 
     pub fn move_down(&mut self) {
@@ -389,9 +443,7 @@ impl App {
         match self.panel {
             Panel::Refs => {
                 if self.ref_index + 1 < self.data.refs.len() {
-                    self.ref_index += 1;
-                    let _ = self.refresh_history();
-                    let _ = self.load_selected_files();
+                    self.select_ref(self.ref_index + 1);
                 }
             }
             Panel::History => {
@@ -407,7 +459,6 @@ impl App {
                 }
             }
         }
-        self.sync_scroll();
     }
 
     pub fn move_up(&mut self) {
@@ -419,9 +470,7 @@ impl App {
         match self.panel {
             Panel::Refs => {
                 if self.ref_index > 0 {
-                    self.ref_index -= 1;
-                    let _ = self.refresh_history();
-                    let _ = self.load_selected_files();
+                    self.select_ref(self.ref_index - 1);
                 }
             }
             Panel::History => {
@@ -437,7 +486,6 @@ impl App {
                 }
             }
         }
-        self.sync_scroll();
     }
 
     fn apply_search_filter(&mut self) {
@@ -470,7 +518,6 @@ impl App {
         }
         self.commit_index = 0;
         self.file_index = 0;
-        self.sync_scroll();
         let _ = self.load_selected_files();
     }
 
@@ -491,8 +538,12 @@ impl App {
             return Ok(());
         }
 
-        let (commits, graph) =
-            RepoData::load_history(&self.repo_path, &ref_entry.tip_oid, 500)?;
+        let (commits, graph) = RepoData::load_history(
+            &self.repo_path,
+            &ref_entry.tip_oid,
+            500,
+            self.first_parent,
+        )?;
         self.all_commits = commits;
         self.all_graph = graph;
         self.apply_search_filter();
@@ -629,7 +680,7 @@ impl App {
         };
 
         format!(
-            "repov | {} | {ref_name} | {id} | {author} | {date} | {files_mode} | wt: {}{search} | / f ? help",
+            "repov | {} | {ref_name} | {id} | {author} | {date} | {files_mode} | wt: {}{search} | b: branch line | / f ? help",
             self.data.repo_name,
             self.data.work_tree_summary
         )
