@@ -596,6 +596,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn merge_numbers_descend_down_history() {
+        use crate::graph::render_graph;
+        use crate::graph::CommitNode;
+
+        let repo = Repository::open(".").unwrap();
+        let tip = repo.head().unwrap().peel_to_commit().unwrap();
+        let (commits, _) =
+            RepoData::load_history(".", &tip.id().to_string(), 500, false).unwrap();
+        let nodes: Vec<CommitNode> = commits
+            .iter()
+            .map(|c| CommitNode {
+                id: c.oid.clone(),
+                parents: c.parents.clone(),
+            })
+            .collect();
+        let graph = render_graph(&nodes);
+        let mut last_num = usize::MAX;
+        for (c, line) in commits.iter().zip(graph.iter()) {
+            if c.parents.len() <= 1 {
+                continue;
+            }
+            let num = line
+                .symbols
+                .chars()
+                .find(|ch| ch.is_ascii_digit() || *ch == '+')
+                .and_then(|ch| {
+                    if ch == '+' {
+                        Some(10)
+                    } else {
+                        ch.to_digit(10).map(|d| d as usize)
+                    }
+                })
+                .expect("merge line should have number");
+            assert!(
+                num <= last_num,
+                "merge numbers should descend down history: {} after {} ({})",
+                num,
+                last_num,
+                c.message
+            );
+            last_num = num;
+        }
+    }
+
+    #[test]
     fn merge_commit_lists_changed_files() {
         let repo = Repository::open(".").expect("open repo");
         let oid = Oid::from_str("53760c978398b46d265d93ae9c0da90acaaa5493").expect("oid");
