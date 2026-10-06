@@ -2,6 +2,8 @@
 
 A gitk-style terminal UI for exploring git repositories.
 
+![repov UI — Refs, History, and Changed Files](https://raw.githubusercontent.com/somayaj/repov/main/docs/screenshot.png)
+
 ## Install
 
 ```bash

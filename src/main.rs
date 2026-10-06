@@ -9,11 +9,7 @@ use ratatui::{backend::CrosstermBackend, layout::Rect, Terminal};
 use std::io;
 use std::time::Duration;
 
-mod app;
-mod diff;
-mod graph;
-mod repo;
-mod ui;
+use repov::{app, ui};
 
 #[derive(Parser)]
 #[command(name = "repov", about = "A gitk-style TUI for exploring git repositories", version)]
